@@ -1,6 +1,6 @@
 # Heptabase → Obsidian Migration Guide
 
-Public Edition `1.0.0-beta` · 更新於 2026-09-25 · [CC BY 4.0](LICENSE) · 作者 Cindy Young（[IdeaMeka](https://ideameka.com)）
+Public Edition `1.0.1-beta` · 更新於 2026-09-25 · [CC BY 4.0](LICENSE) · 作者 Cindy Young（[IdeaMeka](https://ideameka.com)）
 
 > **Public Edition beta。** 本指南整理自實際遷移與修復經驗，目前是 beta 版。它不是一鍵搬家工具，也不應直接套用到未盤點的資料。遇到規格沒涵蓋的情況，歡迎回報問題。
 
@@ -35,28 +35,40 @@ Public Edition `1.0.0-beta` · 更新於 2026-09-25 · [CC BY 4.0](LICENSE) · �
 
 ## 交給 AI Agent：第一段指令
 
-把 Heptabase export、這份 Guide 與一個隔離的 test vault 放進同一個 workspace。第一輪只要求分析，不修改任何檔案：
+使用者通常會貼上 README 的第一段指令（中文）。它要求的五項輸出，對應到本指南是：
+
+1. Source inventory（有哪些資料、各有多少）
+2. Migration Decision Table（建議轉換、封存或跳過，以及原因）
+3. 需要使用者決定的項目
+4. 主要風險
+5. POC 建議（先試哪一張白板，以及為什麼）
+
+第一輪只分析。「不要修改任何檔案」指的是**不修改 Heptabase export 與 test vault**；Agent 可以在工作資料夾裡另建 `_migration_work/`，放 scripts、hash manifest 與報告：
 
 ```text
-Read the migration guide first.
-
-Do not modify any files yet.
-
-Inspect the Heptabase export and target Obsidian environment.
-
-Then provide:
-
-1. Source inventory
-2. Migration Decision Table
-3. Ambiguous items that require my decision
-4. Major migration risks
-5. A representative POC plan
-
-Treat the original Heptabase export as read-only.
-Do not begin batch conversion until I approve the POC.
+我的搬家資料夾/
+  Heptabase-Data-Backup-…/   ← 原始匯出，唯讀
+  Obsidian_Test_Vault/        ← 測試 Vault，POC 通過前不寫入
+  _migration_work/            ← Agent 的 scripts、manifests、報告
 ```
 
-確認 Inventory 與 POC 後才進入批次轉換。POC 應挑一個同時含 Card、圖片、文字、Connection、MindMap 與 nested Whiteboard 的代表性白板，轉完後在 Obsidian 實際打開檢查。
+使用者多半不寫程式。回報時用使用者的語言，先講結論和需要他決定的事；技術細節放在 `_migration_work/` 的報告裡，並告訴使用者報告在哪裡。
+
+### 選 POC 白板
+
+POC 應挑一張**中等大小**（大約 30–80 個物件）、元素齊全的白板：有 Card、圖片、文字、Connection、MindMap，最好還有 nested Whiteboard。不要挑最大的白板，太大會讓 POC 難以逐項檢查。如果 Journal 或 PDF 不在這張白板上，另外各做一個小 POC。
+
+確認 Inventory 與 POC 後才進入批次轉換。
+
+### POC 的最低驗證
+
+- [ ] Canvas 是合法 JSON，node IDs 唯一，edge endpoints 都存在。
+- [ ] 每個 source instance 都對應到一個 Canvas node，數量對帳；例外逐一列出。
+- [ ] 卡片正文與來源 ProseMirror 文字比對，沒有遺失。
+- [ ] 圖片檔與來源檔內容相同（hash），不是只有路徑存在。
+- [ ] Nested whiteboard 在 parent Canvas 裡有對應的 file node。
+- [ ] MindMap 的節點數、階層與來源一致。
+- [ ] 請使用者在 Obsidian 實際打開：左下角「開啟其他 Vault」→「開啟資料夾作為 Vault」→ 選 test vault，再打開 POC 的 `.canvas`。
 
 ## 第一步：凍結來源並建立 Inventory
 
@@ -66,22 +78,61 @@ Do not begin batch conversion until I approve the POC.
 - Markdown、assets 及其他附件；
 - 來源 snapshot ID、匯出時間與工具版本；
 - 每個檔案的相對路徑、大小與 SHA-256；
-- 各 data type 的數量、active／deleted 狀態與抽樣結果。
+- 各 data type 的數量、active／deleted 狀態與抽樣結果；
+- `All-Data.json` 裡的 `VERSION` 與 `DB_SCHEMA_VERSION`（本指南的實測欄位來自 Heptabase `1.103.0`、DB schema `133`）。
 
-來源應設為唯讀或使用不可變快照。Hash manifest 放在來源目錄之外，避免 manifest 自己改變計算範圍。
+來源應設為唯讀或使用不可變快照。Hash manifest 放在來源目錄之外（例如 `_migration_work/`），避免 manifest 自己改變計算範圍。
+
+**Windows 先檢查長路徑。** Heptabase export 可能有超過 260 字元的完整路徑（實測 6 個）。第一次掃描前就要處理，不要等到程式當掉：Python 讀取時使用 `\\?\` 前綴，或把工作資料夾放在較短的路徑。不要替使用者修改系統設定（例如 LongPathsEnabled）；需要時說明原因，請使用者自己決定。
 
 ### Markdown export 不是完整的語意來源
 
-`All-Data.json` 是必要來源，不是選配。Markdown export 適合取得已 render 的文字與附件，但它會遺失 object type、instance ID、白板歸屬、座標、邊線與巢狀關係。
+`All-Data.json` 是必要來源，不是選配。**正文以 `All-Data.json` 的 ProseMirror `content` 為準；Markdown export 主要用來取得 binary（圖片、PDF、影音）與交叉比對。**
 
 | 資料來源 | 主要用途 |
 | --- | --- |
-| Markdown／native export | 已 render 的文字、附件、使用者可直接閱讀的檔案 |
-| `All-Data.json` | object type、ID、relation、placement、`fileId`、semantic structure |
+| `All-Data.json` | 正文（ProseMirror）、object type、ID、relation、placement、`fileId`、semantic structure |
+| Markdown／native export | 圖片與附件的 binary、交叉比對、使用者可直接閱讀的檔案 |
 
-實測中，以下資料只存在或只完整存在於 `All-Data.json`：MindMap（native export 不匯出）、nested whiteboard 的 parent → child 關係、`textElements`（沒有對應的 card 檔案）、`mediaElements` 的座標，以及沒有標題的 image Card。只靠 Markdown export，很容易得到一個「看起來差不多」但少了結構的 Vault。
+不要把 Markdown export 當成正文來源，原因是它很難可靠地對回 source ID：
+
+- `.md` 檔沒有 ID，檔名由標題轉換而來，部分特殊字元會被替換。
+- 沒有標題的卡片會被命名為 `A wonderful new card N`（實測 569 個）。
+- 同名卡片會加數字後綴；部分 `.md` 的內容和 `All-Data.json` 不一致。
+- 垃圾桶裡的卡片（`isTrashed: true`）也會被匯出（實測 3,312 個 `.md`，其中約 830 張在垃圾桶）。
+- `Card Library/` 的 `.md` 放在同一層，但圖片放在各自的 `-assets` 子資料夾（實測 539 個）。
+
+Native export 也可能有 `Mindmap/`（只有階層大綱，沒有座標與節點 ID）和 `Text Element/`。它們可以拿來核對，但 MindMap 結構、nested whiteboard 的 parent → child 關係、`textElements` 與 `mediaElements` 的座標，只有 `All-Data.json` 有。只靠 Markdown export，很容易得到一個「看起來差不多」但少了結構的 Vault。
 
 不要假設 Whiteboard elements 一定巢狀在 `whiteBoardList`。實測 export 中，`cardInstances`、`textElements`、`mediaElements`、`highlightElements`、`journalInstances`、`sections`、`connections` 與 `mindMapInstances` 可能是頂層陣列，再用 `whiteboardId` 關聯 Whiteboard。缺 key、型別不符、孤立引用與重複 ID 都應明確報告，不能默默變成空陣列。
+
+### 實測的 schema（Heptabase 1.103.0／DB schema 133）
+
+以下是一份實際匯出的欄位，作為起點，不是保證。**欄位會隨版本改變，寫 join 邏輯前一定要先實際檢查。**
+
+| 陣列 | 重點欄位 | 關聯 |
+| --- | --- | --- |
+| `cardList` | `title`、`content`（ProseMirror）、`isTrashed` | Card 本體 |
+| `whiteBoardList` | `name`、`isTrashed` | Whiteboard 本體 |
+| `cardInstances` | `cardId`、`whiteboardId`、`x`、`y`、`width`、`height`、`isFolded`、`foldedHeight` | Card 放在白板上的位置 |
+| `mediaCards`／`mediaCardInstances` | `fileId`、`type`、`transcript`／`cardId`、`whiteboardId` | Media card 與它的位置 |
+| `pdfCards`／`pdfCardInstances` | `fileId`、`title`／`pdfCardId`、`whiteboardId` | PDF card 與它的位置 |
+| `textElements` | `content`、`whiteboardId`、座標 | 白板上的文字，直接帶位置 |
+| `mediaElements` | `fileId`、`whiteboardId`、座標 | 白板上的圖片，直接帶位置 |
+| `sections`／`sectionObjectRelations` | `title`、座標／`sectionId`、`objectId` | 分區與分區裡的物件 |
+| `connections` | `beginId`、`beginObjectType`、`endId`、`endObjectType`、`beginStyle`、`endStyle`、`description` | 連線 |
+| `whiteboardInstances` | `whiteboardId`（child）、`containerId`（parent）、`containerType`、`isChild`、座標 | Nested whiteboard |
+| `mindMaps`／`mindMapInstances` | `layout`／`mindMapId`、`whiteboardId`、座標、`boundingBoxRelativeX/Y` | MindMap 與它的位置 |
+| `mindMapNodes` | `mindMapId`、`parentId`、`childNodeIds`、`side`、`isCollapsed` | MindMap 階層 |
+| `mindMapTextNodes`／`mindMapCardNodes` | `content`／`cardId` | 節點內容；ID 與 `mindMapNodes` 共用 |
+| `journalList`／`journalInstances` | `date`、`content`／`journalDate`、`whiteboardId` | Journal 與它的位置 |
+| `files` | `id`（即 `fileId`）、`name`、`size`、`type` | 附件的 metadata |
+
+幾個容易出錯的地方：
+
+- **連線端點的型別名稱和陣列名稱不一樣。** 實測 `beginObjectType`／`endObjectType` 的值有 `cardInstance`、`textElement`、`imageElement`（對應 `mediaElements`）、`mindMapTextNode`、`mindMapCardNode`、`highlightElementInstance`、`pdfCardInstance`、`section`。先列出所有出現過的值，再逐一對應。
+- **有些 ID 是刻意共用的。** `mindMapNodes` 和 `mindMapTextNodes`／`mindMapCardNodes` 用同一個 node ID，`actionItems` 和 `actionItemAdds` 也是。檢查重複 ID 要在同一張表內做，不要跨表報告。
+- **Card 被丟進垃圾桶，instance 不一定跟著消失。** 使用中的白板可能還有指向已刪除或不存在卡片的 instance，要列出來問使用者。
 
 ## 第二步：建立 Migration Decision Table
 
@@ -95,6 +146,10 @@ Do not begin batch conversion until I approve the POC.
 | Source deleted／system artifact | Skip active migration：不恢復成正式內容，但保留排除原因與 audit evidence。 |
 
 決策表至少包含 `Data type / Count / Value / Recommended action / Reason`。Count 必須標明範圍與單位，區分 unique content、instances、relationships 和 active／deleted；未知值寫「待盤點」，不要填成 0。
+
+決策表要涵蓋 `All-Data.json` 裡**每一個非空的陣列**，不只 Card 和 Whiteboard。容易被漏掉的有：sections、connections、PDF cards、media cards、`sources`（例如 Readwise 匯入）、`insights`（Heptabase AI 自動產生的洞察，不是使用者寫的）、`chats`、`templates`、`collections`、`tabs`、`actionItems`。使用者價值不明的系統資料，預設 Archive only。
+
+Journal 也要分開盤點：instance 可能指向沒有正文的日期，也可能有空白日記或匯出日期之後的日期。這些都列成例外，不要默默略過。
 
 ## 第三步：定義目標 Vault 邊界
 
@@ -111,7 +166,7 @@ Active Vault/
   .obsidian/
 ```
 
-`heptabase/` 內的子資料夾（例如 `cards/`、`sources/`、`media/`）是遷移時的設計選擇，不是 Heptabase 的原始結構；Heptabase export 本身是扁平的 Card Library。分流規則要寫下來，才能重現。
+`heptabase/` 內的子資料夾（例如 `cards/`、`sources/`、`media/`）是遷移時的設計選擇，不是 Heptabase 的原始結構；Heptabase export 的 Card Library 把 `.md` 放在同一層，附件放在各自的 `-assets` 子資料夾。分流規則要寫下來，才能重現。
 
 重建用的 manifests、來源快照與 audit artifacts 應留在 migration workspace，不要因歷史範例而自動塞進 production Vault。每個 Whiteboard 可以保留自己的 Markdown、Canvas 與 assets 子資料夾，但移動任何檔案後，必須更新整個 Vault 的 references，而不只更新同一個白板或只更新 Canvas。
 
@@ -137,6 +192,18 @@ Active Vault/
 
 Card 的 `title` 可以是空的，但 `content` 仍可能是一張完整的圖片：`{"type":"image","attrs":{"fileId":"..."}}`。以 title 是否存在來決定要不要轉換，會靜默遺失內容。實測中，17 個原本被轉成 `*(empty card)*` 的 Canvas nodes，回查後全部是可以復原的 image Card；另有 3 張來源真的沒有內容，才保留 empty representation。
 
+注意「沒有標題的 image Card」和 `mediaCards` 是兩種不同的東西：前者是 `cardList` 裡 title 空白、`content` 是圖片的卡片，圖片通常在 export 裡找得到；後者是獨立的 media card，binary 常常不在 export 裡（見「Placeholder 是警訊」）。
+
+### 檔名的預設規則
+
+第一次建立 Obsidian 檔名，和事後 rename 是兩件事。下面是建議預設，POC 時先給使用者看，同意後再批次套用：
+
+- **有標題**：用標題當檔名。
+- **沒有標題**：依內容命名，例如取正文第一行的前 30 個字；圖片卡用「未命名圖片卡」加 6 碼 source ID。不要用 UUID 當主要檔名。
+- **Windows 與 Obsidian 不允許的字元**（`\ / : * ? " < > |`），以及會干擾連結的 `# ^ [ ]`：換成全形字元或移除。
+- **同名碰撞**：加 6 碼 source ID 後綴，不要覆寫。
+- **全部寫進 mapping log**：source ID、原標題、最後的檔名、套用的規則。
+
 ### Canvas 的最低資料
 
 ```json
@@ -154,9 +221,25 @@ Card 的 `title` 可以是空的，但 `content` 仍可能是一張完整的圖�
 
 JSON Canvas 並不要求 Tab 縮排。舊案例曾把 Canvas 開啟失敗歸因於 space indentation，但這不是通用規格。真正應驗證的是合法 JSON、欄位型別、唯一 node IDs、有效 edge endpoints、有限座標與正確的 Vault-relative paths。
 
+幾個要事先決定、並寫進報告的對應：
+
+- **摺疊的卡片**（`isFolded: true`）：Canvas 沒有摺疊狀態。選擇用完整 `height`（內容完整可見）或 `foldedHeight`（外觀接近原本），全部一致。
+- **箭頭樣式**：`connections` 的 `beginStyle`／`endStyle` 對應 Canvas edge 的 `fromEnd`／`toEnd`（`arrow` 或 `none`）。
+- **連線文字**：`description` 轉成 edge 的 `label`。
+
 ### MindMap 與 nested whiteboards
 
-MindMap 不能因為目標格式不同就直接 skip。來源在 `mindMapList` 的 nodes 與 `mindMapEdges`；每個 instance 使用穩定 ID 轉換 nodes 與 edges，edges 保留 `fromNode`／`toNode`／`fromSide`／`toSide`。沒有原始座標時可採可重現的樹狀 layout，但必須說明這不是像素級還原。
+MindMap 不能因為目標格式不同就直接 skip。實測的來源結構（欄位名稱仍要先實際檢查）：
+
+- `mindMaps`：MindMap 本體；`mindMapInstances`：它放在哪張白板、外框座標。
+- `mindMapNodes`：階層，用 `parentId` 與 `childNodeIds` 表示；沒有獨立的 edges 陣列，edges 要從 parent → child 推出來。
+- `mindMapTextNodes`／`mindMapCardNodes`：節點的文字（ProseMirror）或指向的 Card，ID 與 `mindMapNodes` 相同。
+
+每個 instance 使用穩定 ID（instance ID + node ID）轉成 Canvas nodes 與 edges，edges 保留 `fromNode`／`toNode`／`fromSide`／`toSide`。節點本身沒有座標，用 instance 的 `x`／`y`／`width`／`height` 當外框，內部採可重現的樹狀 layout。`boundingBoxRelativeX/Y` 的確切意義尚未確認，不要單憑推測換算。
+
+**事先告訴使用者：MindMap 搬過去後會重新排版，外觀和 Heptabase 不同，但節點、文字與階層應該一致。** 否則使用者很可能以為搬壞了。
+
+Nested whiteboard 的關係記在 `whiteboardInstances`：`whiteboardId` 是 child，`containerId` 是 parent，`containerType` 為 `whiteboard` 時才是白板裡的白板（實測另有 `map`，是放在總覽地圖上的位置）。實測中同一張 child 可能同時放在兩張以上的 parent 裡，也可能有 `containerId` 指向不存在的白板，兩者都要列出來。
 
 Nested whiteboard 的 fidelity 不只包括 child Canvas 檔案存在，還包括 parent → child relationship、child 在 parent 中的位置、child 自身內容與最終 reference。把所有 Canvas 攤平成互不相干的檔案，仍然是結構遺失；而且這種遺失不會產生任何 broken reference。
 
@@ -186,7 +269,19 @@ Nested whiteboard 的 fidelity 不只包括 child Canvas 檔案存在，還包�
 
 ### ProseMirror 不是純文字
 
-Heptabase 富文本可能使用 ProseMirror JSON。必須遞迴提取 text nodes；空 paragraph 不一定有 `content`，不要用固定深度索引。
+Heptabase 富文本使用 ProseMirror JSON。必須遞迴處理；空 paragraph 不一定有 `content`，不要用固定深度索引。
+
+不只要取文字，還要把每一種 node 轉成對應的 Markdown。先列出資料裡實際出現過的所有 node 與 mark 類型，再逐一決定轉法，未處理的類型要報告，不要默默丟掉。實測出現過：
+
+- **Nodes**：`paragraph`、`heading`、`bullet_list_item`、`numbered_list_item`、`todo_list_item`、`toggle_list_item`、`blockquote`、`code_block`、`horizontal_rule`、`table`／`table_row`／`table_cell`／`table_header`、`image`、`video`、`audio`、`file`、`math_inline`／`math_display`、`date`、`mention`、`card`、`whiteboard`、`pdf_card`、`image_card`、`video_card`、`highlight_element`、`section`、`chat`、`embed`、`hard_break`。
+- **Marks**：`strong`、`em`、`underline`、`strike`、`code`、`link`、`highlight`、`color`、`anchor`。
+
+兩個特別要處理的情況：
+
+- **內部連結寫成網址。** 指向其他卡片的連結可能是 `https://app.heptabase.com/<space>/card/<id>`（實測 553 個），要依 source ID 轉成 Obsidian 的 wikilink。
+- **圖片直接內嵌在正文裡。** 部分圖片以 base64 `data:image/...` 存在 `content` 中（實測 16 個），要取出成獨立檔案再 embed。
+
+Connection 的 `description` 也是 ProseMirror，轉成 Canvas edge 的 `label` 文字。
 
 ### 欄位名稱不能用猜的
 
@@ -198,9 +293,18 @@ Heptabase 富文本可能使用 ProseMirror JSON。必須遞迴提取 text nodes
 
 同樣地，缺圖要分開兩種情況：Migration 漏掉的，與來源 export 本來就沒有 binary 的。若 source object、placement 與 `fileId` 都在，但 export 裡確實沒有檔案，標記為 `source-unrecoverable` 並保留 object 與位置，不要讓 Agent 反覆重試不存在的檔案。
 
+獨立的 `mediaCards` 特別要先盤點比例。實測中，146 張圖片類 media card，以 `files` 表的大小比對，在 export 裡一張都找不到對應檔案，影片與音訊類也一樣；另有 78 張沒有 `files` 紀錄。遇到這種情況要在 Inventory 階段就告訴使用者，並建議他：重要的幾張可以回 Heptabase 手動另存。
+
 ### 媒體檔名可能碰撞
 
-大量來源檔可能都叫 `image.png`，export 後才被加上數字後綴。可以使用檔名、size、source ID 與 metadata 建立候選，但同 size 不保證是同一檔案。多候選必須列為 ambiguous，不能直接選第一個。
+大量來源檔可能都叫 `image.png`，export 後才被加上數字後綴。export 的檔名裡也沒有 `fileId`。
+
+建議的對應方式：
+
+1. 從 `files` 表用 `fileId` 取得 `name` 與 `size`。
+2. 在 export 裡找 size 相同的檔案當候選；再用檔名、所在的 `-assets` 資料夾與卡片標題縮小範圍。
+3. 只剩一個候選時才算對上。多個候選時，比較內容 hash：內容完全相同就可以共用；內容不同就列為 ambiguous，不能直接選第一個。
+4. 找不到候選時，標記 `source-unrecoverable`。
 
 ### 重複的 Canvas
 
@@ -320,9 +424,14 @@ Cleanup 優先移到 Vault 外 quarantine，不直接永久刪除。Quarantine r
 
 Migration success 不是「所有檔案都存在」，而是內容、關係、空間結構與可用性都被保存，所有例外也誠實可追溯。這份 Guide 真正要回答的問題是：**怎麼知道你真的搬到了你以為自己搬到的東西？**
 
+## 變更紀錄
+
+- **1.0.1-beta（2026-09-25）**：依一次盲測修訂（一個不知道先前過程的 AI Agent，只靠 README 與本指南完成 Inventory 與一張白板的 POC）。新增：工作資料夾與報告位置、POC 選法與最低驗證、實測 schema 表、正文以 `All-Data.json` 為準、檔名預設規則、`fileId` 對應方式、ProseMirror 類型清單、Windows 長路徑提前檢查。更正：MindMap 欄位名稱、native export 其實可能有 `Mindmap/` 與 `Text Element/`、Card Library 不是完全扁平、media card 缺檔的規模。
+- **1.0.0-beta（2026-09-25）**：第一個公開版本。
+
 ## 版本、來源與授權
 
-- Public Edition：`1.0.0-beta`
+- Public Edition：`1.0.1-beta`（依盲測結果修訂；變更見文末）
 - 技術來源：Heptabase → Obsidian Migration Guide v3.2 / field-tested specification（2026-09-21）
 - 技術來源 SHA-256：`25F67AB318F56DD75F2FF24FB51AEFCF1E552CC6984CC54E7727ADD76E4B2DE8`
 - Public Edition 更新日期：2026-09-25

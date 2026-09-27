@@ -135,10 +135,10 @@ AI 工具會讀取你電腦上的筆記內容來工作。如果裡面有敏感�
 - Heptabase 匯出本身沒有的東西，AI 也救不回來，但它應該列出來告訴你。例如：獨立的媒體卡片（media card）的圖片和影片，常常不在匯出裡；側邊欄的排列順序也不會匯出。重要的，可以回 Heptabase 手動另存。
 - 這是一份持續更新的規格。遇到新的狀況，歡迎開 Issue 告訴我。
 
-<!-- 延伸閱讀（網站上線後補回）
-- 為什麼我離開 Heptabase：網站文章連結
-- 我怎麼搬了三次（完整的搬家故事和截圖）：網站文章連結
--->
+## 延伸閱讀
+
+- 為什麼我離開 Heptabase：[從 Heptabase 到 Obsidian：三年筆記之後，我為什麼決定搬家](https://ideameka.com/writing/heptabase-obsidian/)
+- 我怎麼搬了三次（完整的搬家故事和截圖）：[Heptabase 搬到 Obsidian：不會寫程式，也能讓 AI 幫你搬完](https://ideameka.com/writing/heptabase-obsidian-migration-guide/)
 
 ## 授權
 

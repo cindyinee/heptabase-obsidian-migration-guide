@@ -1,6 +1,6 @@
 # Heptabase → Obsidian Migration Guide
 
-Public Edition `1.0.1-beta` · 更新於 2026-09-25 · [CC BY 4.0](LICENSE) · 作者 Cindy Young（[IdeaMeka](https://ideameka.com)）
+Public Edition `1.0.2-beta` · 更新於 2026-09-27 · [CC BY 4.0](LICENSE) · 作者 Cindy Young（[IdeaMeka](https://ideameka.com)）
 
 > **Public Edition beta。** 本指南整理自實際遷移與修復經驗，目前是 beta 版。它不是一鍵搬家工具，也不應直接套用到未盤點的資料。遇到規格沒涵蓋的情況，歡迎回報問題。
 
@@ -168,6 +168,10 @@ Active Vault/
 
 `heptabase/` 內的子資料夾（例如 `cards/`、`sources/`、`media/`）是遷移時的設計選擇，不是 Heptabase 的原始結構；Heptabase export 的 Card Library 把 `.md` 放在同一層，附件放在各自的 `-assets` 子資料夾。分流規則要寫下來，才能重現。
 
+**原始 export 不要放在 Vault 裡。** Obsidian 會把 export 裡的 `.md` 也當成筆記：搜尋與關聯圖會同時出現原始版和轉換版。如果一定要放在 Vault 裡，就加入「設定 → 檔案與連結 → 排除的檔案」，規則直接寫資料夾路徑，例如 `Heptabase-Data-Backup-2026-08-17T05-56-08-768Z/`。**開頭不要加 `^`**：Obsidian 會把它當成路徑的一部分，結果什麼都沒排除（實測就發生過，設定檔裡「有規則」，搜尋卻仍然出現兩份）。加完後實際搜尋一個卡片標題，確認每篇只出現一次。
+
+POC 或測試用的產物（例如 `poc/` 資料夾）也不要留在 Vault 裡。移出前先掃描全 Vault，確認沒有任何筆記或 Canvas 連到它。
+
 重建用的 manifests、來源快照與 audit artifacts 應留在 migration workspace，不要因歷史範例而自動塞進 production Vault。每個 Whiteboard 可以保留自己的 Markdown、Canvas 與 assets 子資料夾，但移動任何檔案後，必須更新整個 Vault 的 references，而不只更新同一個白板或只更新 Canvas。
 
 ## 第四步：決定每種物件的 Obsidian 表示方式
@@ -202,7 +206,18 @@ Card 的 `title` 可以是空的，但 `content` 仍可能是一張完整的圖�
 - **沒有標題**：依內容命名，例如取正文第一行的前 30 個字；圖片卡用「未命名圖片卡」加 6 碼 source ID。不要用 UUID 當主要檔名。
 - **Windows 與 Obsidian 不允許的字元**（`\ / : * ? " < > |`），以及會干擾連結的 `# ^ [ ]`：換成全形字元或移除。
 - **同名碰撞**：加 6 碼 source ID 後綴，不要覆寫。
+- **私用區字元（Unicode Private Use Area，`U+E000`–`U+F8FF`）**：從 Word 或 AI 回答貼上的內容常帶有看不見的字元，在 Windows 上能開，但部分工具打不開，Obsidian 也可能顯示成怪字。ChatGPT 的引用標記（`U+E200 cite … turn0search… U+E201`）整段移除，不要只刪掉私用區字元而留下 `citeturn0search…`；有意義的項目符號轉成 `•`；其他直接移除。檔名、frontmatter `title` 和連結顯示名稱都要處理。原始 export 裡的同類檔名不要改（來源唯讀），用排除設定隱藏即可。
 - **全部寫進 mapping log**：source ID、原標題、最後的檔名、套用的規則。
+
+### 連結的寫法
+
+Wikilink 指向 Vault 裡的完整路徑，例如 `[[heptabase/cards/參考]]`，Obsidian 會把整段路徑顯示出來。所以一般連結都要加上顯示名稱：
+
+- **一般連結**：`[[heptabase/cards/參考|參考]]`。顯示名稱用 frontmatter 的 `title`（清除私用區字元之後），不要用清理過的檔名：檔名裡的替換字元不是使用者原本寫的字。已經有顯示名稱的連結不要改。
+- **嵌入**：`![[heptabase/media/image 926-57d666ab.png]]` 不加顯示名稱。嵌入的 `|` 後面會被當成說明或寬度（標題剛好是數字時，圖片會被縮放成那個寬度）。
+- **表格裡的連結**：`|` 會被當成欄位分隔，要寫成 `[[heptabase/cards/參考\|參考]]`。
+- **AI 回答裡的引用編號**：`[[4]](https://…)` 不是 wikilink，但 Obsidian 會把 `[[4]]` 當成連到一篇叫「4」的筆記。改成 `[\[4\]](https://…)`。
+- **範圍是整個 Vault**：`heptabase/` 的每個子資料夾（包括 `archive/`）和 `daily/`，不是只有 cards 和 whiteboards。實測第一次只處理 cards 與 whiteboards，後來又在 archive 找到 352 個、daily 找到 328 個沒有顯示名稱的連結。
 
 ### Canvas 的最低資料
 
@@ -247,6 +262,33 @@ Nested whiteboard 的 fidelity 不只包括 child Canvas 檔案存在，還包�
 
 同一天的 Journal 正文只保存一份，多個白板 instances 都指向同一份 daily note。Manifest 應記錄 instance ID、日期、daily path、whiteboard ID、geometry 與 folded state。Unique dates、正文檔案數和 instances 數量要分開對帳。
 
+### 搬完後的 Obsidian 顯示設定
+
+Canvas 的 file node 會把整份筆記再畫一次，包含 Properties 與檔名標題。卡片一多，白板上每張卡片都被屬性塞滿，內容反而看不到。建議把下面這段 CSS 列為搬完後的標準設定，存成 `.obsidian/snippets/heptabase-canvas.css`：
+
+```css
+/* 只影響白板上的卡片預覽；一般筆記畫面不變，也不改任何檔案內容。 */
+.canvas-node-content .metadata-container,
+.canvas-node-content .inline-title {
+  display: none !important;
+}
+```
+
+再到「設定 → 外觀 → CSS 片段」開啟它（或在 `.obsidian/appearance.json` 的 `enabledCssSnippets` 加入 `"heptabase-canvas"`）。檔案存在不等於已啟用，兩者都要確認。
+
+**重複標題有三個層次，分開處理：**
+
+| 在哪裡看到 | 原因 | 處理 |
+| --- | --- | --- |
+| 白板上的卡片 | 檔名標題加上正文第一行 | 上面的 CSS |
+| 一般筆記畫面 | 「內嵌標題（inline title）」加上正文第一行 | 使用者偏好：關閉就只剩一個標題 |
+| 白板卡片框外的淡灰字 | Canvas 顯示檔名標籤 | 選用，可另外用 CSS 隱藏 |
+
+Heptabase 卡片的標題就是正文第一行，所以不論第一行是 `#` 標題、粗體或一般文字，開著 inline title 幾乎每張卡片都會重複。處理方式二選一，**讓使用者決定，不要預設批次刪除**：
+
+- **A（建議預設）**：保留正文第一行，用 CSS 與 inline title 設定控制顯示。正文保存的是原本的標題文字；檔名是清理過的版本，不能反過來以檔名為準。
+- **B**：只移除「和 frontmatter `title` 完全相同」的第一個標題。內容不同的真正章節標題不能動。
+
 ## 第五步：用可回復的 Pipeline 執行
 
 1. Inspect export schema、來源狀態與 data types。
@@ -276,8 +318,9 @@ Heptabase 富文本使用 ProseMirror JSON。必須遞迴處理；空 paragraph 
 - **Nodes**：`paragraph`、`heading`、`bullet_list_item`、`numbered_list_item`、`todo_list_item`、`toggle_list_item`、`blockquote`、`code_block`、`horizontal_rule`、`table`／`table_row`／`table_cell`／`table_header`、`image`、`video`、`audio`、`file`、`math_inline`／`math_display`、`date`、`mention`、`card`、`whiteboard`、`pdf_card`、`image_card`、`video_card`、`highlight_element`、`section`、`chat`、`embed`、`hard_break`。
 - **Marks**：`strong`、`em`、`underline`、`strike`、`code`、`link`、`highlight`、`color`、`anchor`。
 
-兩個特別要處理的情況：
+三個特別要處理的情況：
 
+- **強制換行（`hard_break`，Shift+Enter）。** Native export 把它寫成行尾的 `\`，但 Obsidian 不支援這種寫法，會直接顯示出 `\`（實測 `All-Data.json` 約 5,253 個）。轉換時從 ProseMirror 處理：一般段落輸出「行尾兩個空格＋換行」，表格內輸出 `<br>`。實測這樣轉出的 Vault，行尾 `\` 為 0。已經搬完才發現的話，事後修改要避開：下一行是空白的 `\`（可能是真的反斜線）、表格、含 `$` 的數學式、code blocks 與 `\\`，並在 Obsidian 的編輯與閱讀模式都抽查。
 - **內部連結寫成網址。** 指向其他卡片的連結可能是 `https://app.heptabase.com/<space>/card/<id>`（實測 553 個），要依 source ID 轉成 Obsidian 的 wikilink。
 - **圖片直接內嵌在正文裡。** 部分圖片以 base64 `data:image/...` 存在 `content` 中（實測 16 個），要取出成獨立檔案再 embed。
 
@@ -382,6 +425,9 @@ Cleanup 優先移到 Vault 外 quarantine，不直接永久刪除。Quarantine r
 - [ ] 所有 Canvas file nodes 指向 Vault 內存在的 mapped target。
 - [ ] Markdown links、wikilinks、images、attachments 與 block links 分別驗證。
 - [ ] 任何 rename／move／資料夾重組之後，**全部筆記**內的 references 都已依 mapping 更新，不只 Canvas。
+- [ ] 連結驗證的範圍是整個目標 Vault（`heptabase/` 每個子資料夾與 `daily/`），不是「這一輪改過的資料夾」。不屬於遷移的筆記（例如 Obsidian 預設的 `歡迎.md`）若有斷鏈，要列出來讓使用者決定，不要默默略過。
+- [ ] 一般 wikilink 都有顯示名稱；`![[...]]` 嵌入沒有被加上顯示名稱；表格內的分隔符是 `\|`；`[[數字]](網址)` 的舊寫法為 0。
+- [ ] 驗證程式本身要能正確解析：顯示名稱裡可能有跳脫的 `\]`，只在未跳脫的 `]]` 結束；行內程式碼與 code blocks 裡的 `[[]]` 是範例，不算連結。
 - [ ] MindMap 的 node text、edges、hierarchy 與 relationships 已對帳。
 - [ ] Journal instances 指向正確且唯一的 daily notes。
 
@@ -397,6 +443,8 @@ Cleanup 優先移到 Vault 外 quarantine，不直接永久刪除。Quarantine r
 - [ ] 圖片與附件不只路徑存在，也能在 Obsidian 正常 render／開啟。
 - [ ] 筆記正文沒有大量不必要的 UUID anchors 或 raw JSON。
 - [ ] 抽查代表性白板：在 Obsidian 實際點擊卡片、連結與嵌入內容。
+- [ ] 白板畫面與一般筆記畫面分開看。各看一張第一行是 `#` 標題的卡片、一張第一行是一般文字或粗體的卡片、一張沒有標題的筆記（PDF／media card）。只看白板不能推論筆記畫面也正常，反之亦然。
+- [ ] 設定類的改動要看「行為」，不是只看設定檔：排除規則要實際搜尋一次，CSS 要實際打開白板看。搜尋結果的數量不等於重複的篇數：同一個標題本來就可能同時出現在主卡片、daily 與 highlight 裡，要看結果的路徑。
 
 ### 收尾
 
@@ -406,10 +454,14 @@ Cleanup 優先移到 Vault 外 quarantine，不直接永久刪除。Quarantine r
 - [ ] Unresolved recoverable items = 0。
 - [ ] 已知無法恢復的項目逐筆分類並保留 evidence。
 - [ ] Active-only residuals 全部分類；沒有未判定就刪除的檔案。
+- [ ] 轉換後的檔名與內容，私用區字元 = 0；改名後舊路徑的引用 = 0。
+- [ ] 原始 export 的檔案數與 hash 前後一致。
 
 **Zero broken references 並不能證明 structural fidelity。** 如果一個 relation 根本沒被建立，就不會出現 broken reference：child Canvas、MindMap edges、geometry、內容順序或 media rendering 遺失時，即使每個 path 都存在，遷移仍未完成。
 
 反過來也要注意，「Canvas broken refs = 0」只涵蓋 Canvas。實測中，最終驗收時 Canvas 全數正常，但資料夾重組只更新了 Canvas 內的路徑，筆記裡仍有約 1,700 個連結指向已不存在的舊資料夾；補做全 Vault 的筆記連結掃描後才發現並修復。
+
+第二次實測（2026-09-27）又遇到兩次同類問題：驗證只涵蓋「這一輪處理的資料夾」，因此先後漏掉 archive 與 daily 裡沒有顯示名稱的連結；排除規則寫錯，但驗證只檢查「設定檔裡有沒有這條規則」，沒有實際搜尋。daily 的連結與排除規則，都是使用者在 Obsidian 裡看到才發現。**程式驗證的範圍與方法本身也要被檢查。**
 
 ## 完成的定義
 
@@ -426,15 +478,16 @@ Migration success 不是「所有檔案都存在」，而是內容、關係、�
 
 ## 變更紀錄
 
+- **1.0.2-beta（2026-09-27）**：依第二次實測修訂（Codex 依本指南，從一份完整 export 做到全量轉換：2,485 張卡片、94 張白板、612 篇 Journal；原始 export 9,051 個檔案 hash 前後一致）。新增：連結的寫法（顯示名稱、嵌入、表格 `\|`、AI 引用編號、整個 Vault 的範圍）、搬完後的顯示設定（白板 CSS、重複標題的三個層次與兩種處理方式）、強制換行的轉法、私用區字元、原始 export 的排除規則與 POC 產物的處理，以及對應的驗證項目。
 - **1.0.1-beta（2026-09-25）**：依一次盲測修訂（一個不知道先前過程的 AI Agent，只靠 README 與本指南完成 Inventory 與一張白板的 POC）。新增：工作資料夾與報告位置、POC 選法與最低驗證、實測 schema 表、正文以 `All-Data.json` 為準、檔名預設規則、`fileId` 對應方式、ProseMirror 類型清單、Windows 長路徑提前檢查。更正：MindMap 欄位名稱、native export 其實可能有 `Mindmap/` 與 `Text Element/`、Card Library 不是完全扁平、media card 缺檔的規模。
 - **1.0.0-beta（2026-09-25）**：第一個公開版本。
 
 ## 版本、來源與授權
 
-- Public Edition：`1.0.1-beta`（依盲測結果修訂；變更見文末）
+- Public Edition：`1.0.2-beta`（依兩次實測修訂；變更見文末）
 - 技術來源：Heptabase → Obsidian Migration Guide v3.2 / field-tested specification（2026-09-21）
 - 技術來源 SHA-256：`25F67AB318F56DD75F2FF24FB51AEFCF1E552CC6984CC54E7727ADD76E4B2DE8`
-- Public Edition 更新日期：2026-09-25
+- Public Edition 更新日期：2026-09-27
 - 授權：Creative Commons Attribution 4.0 International（CC BY 4.0）
 
 你可以依 CC BY 4.0 分享與改作這份 Public Edition，但必須標示作者 Cindy Young、作品名稱、授權方式，並說明是否做過修改。案例中的個人資料、原始 Vault、第三方圖片與軟體本身不因本文件授權而自動改變其權利狀態。

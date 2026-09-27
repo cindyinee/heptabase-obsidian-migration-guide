@@ -137,8 +137,8 @@ AI 工具會讀取你電腦上的筆記內容來工作。如果裡面有敏感�
 
 ## 延伸閱讀
 
-- 為什麼我離開 Heptabase：[從 Heptabase 到 Obsidian：三年筆記之後，我為什麼決定搬家](https://ideameka.com/writing/heptabase-obsidian/)
-- 我怎麼搬了三次（完整的搬家故事和截圖）：[Heptabase 搬到 Obsidian：不會寫程式，也能讓 AI 幫你搬完](https://ideameka.com/writing/heptabase-obsidian-migration-guide/)
+- 為什麼我離開 Heptabase：[工具會換，資料要留下：我為什麼離開 Heptabase](https://ideameka.com/writing/heptabase-obsidian/)
+- 我怎麼搬了三次（完整的搬家故事和截圖）：[Heptabase 搬到 Obsidian：3,000 多張卡片，讓 AI 幫你搬完](https://ideameka.com/writing/heptabase-obsidian-migration-guide/)
 
 ## 授權
 
